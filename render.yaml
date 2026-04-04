@@ -1,18 +1,7 @@
 # Render Blueprint - Telegram Video Downloader Bot
-# Deploys to Render Free Tier automatically
-#
-# SETUP INSTRUCTIONS:
-# 1. Push this file to GitHub
-# 2. Go to https://render.com/blueprints
-# 3. Click "Create Blueprint Instance"
-# 4. Select your GitHub repo
-# 5. Set TELEGRAM_BOT_TOKEN in the environment variables
-# 6. Click "Create Blueprint"
-#
-# The bot will deploy automatically!
 
 previews:
-  generation: off  # Disable preview environments for free tier
+  generation: off
 
 services:
   - type: web
@@ -24,13 +13,11 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
-      # Bot token - SET THIS MANUALLY IN RENDER DASHBOARD!
-      # Go to Environment tab and add: TELEGRAM_BOT_TOKEN=your_token_here
+      # Bot token - REQUIRED: Set this in Render Dashboard
       - key: TELEGRAM_BOT_TOKEN
-        sync: false  # Will be prompted during blueprint creation
+        sync: false
 
-      # Bot username is auto-populated after first deploy
-      # Reference the service itself to get the external URL
+      # External URL - Auto-populated from Render's default env var
       - key: RENDER_EXTERNAL_URL
         fromService:
           type: web
@@ -41,23 +28,21 @@ services:
       - key: PORT
         value: "8080"
       - key: GIN_MODE
-        value: release
+        value: "release"
 
-      # Debug mode (set to 'true' for verbose logging)
+      # Debug mode
       - key: DEBUG
         value: "false"
 
       # Optional: Path to cookies file for authenticated downloads
-      # Place cookies.txt in /app/config/ directory
       - key: COOKIES_FILE
         value: ""
 
-# Environment variable groups (optional - for organization)
 envVarGroups:
   - name: bot-configuration
     envVars:
       - key: LOG_LEVEL
-        value: info
+        value: "info"
       - key: REQUEST_TIMEOUT
         value: "60"
       - key: MAX_FORMATS
