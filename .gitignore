@@ -1,0 +1,36 @@
+# Environment files
+.env
+.env.local
+.env.production
+
+# Cookies file (may contain sensitive data)
+cookies.txt
+*.txt
+
+# Logs
+*.log
+logs/
+
+# Binary output
+bot
+bot.exe
+*.exe
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+dist/
+build/

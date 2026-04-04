@@ -1,0 +1,23 @@
+# Render Blueprint - telegram-video-downloader-bot
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: telegram-video-bot
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          type: web
+          name: telegram-video-bot
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: PORT
+        value: 8080
+      - key: GIN_MODE
+        value: release
