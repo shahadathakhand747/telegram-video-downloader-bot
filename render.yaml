@@ -1,5 +1,4 @@
 # Render Blueprint - Telegram Video Downloader Bot
-
 previews:
   generation: off
 
@@ -17,12 +16,9 @@ services:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
 
-      # External URL - Auto-populated from Render's default env var
+      # External URL - Hardcoded (matches your service name)
       - key: RENDER_EXTERNAL_URL
-        fromService:
-          type: web
-          name: telegram-video-bot
-          envVarKey: RENDER_EXTERNAL_URL
+        value: "https://telegram-video-bot.onrender.com"
 
       # Server configuration
       - key: PORT
