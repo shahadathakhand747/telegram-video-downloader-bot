@@ -1,35 +1,34 @@
-name: 1.2M Requests - WordPress LMS Stress Test
+name: Tutor LMS Dual-URL Stress Test
 
 on:
   workflow_dispatch:
     inputs:
-      target_url:
-        description: 'Target URL (without https://)'
+      target_domain:
+        description: 'Target domain (without https://)'
         required: true
         default: 'rifatacademy.com'
-      endpoint:
-        description: 'Path to hit (e.g., /courses/, /wp-json/wp/v2/courses)'
-        required: true
-        default: '/wp-json/wp/v2/courses'
       concurrent_connections:
         description: 'Connections per runner'
         required: true
         default: '100'
       requests_per_runner:
-        description: 'Requests per runner (60k = 1.2M total)'
+        description: 'Requests per runner per URL (60k = 1.2M total across both)'
         required: true
-        default: '60000'
+        default: '30000'
 
 jobs:
   bombard:
-    name: Runner ${{ matrix.instance }}
+    name: Runner ${{ matrix.instance }} - ${{ matrix.url_path }}
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false  # Let all jobs complete even if one dies
+      fail-fast: false
       matrix:
         instance: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+        url_path:
+          - '/course-category/hsc/?tutor-course-filter-category=52'
+          - '/course-category/ssc-27-28/?tutor-course-filter-category=58'
     steps:
-      - name: Install Bombardier (Latest Release)
+      - name: Install Bombardier
         run: |
           wget -q https://github.com/codesenberg/bombardier/releases/download/v1.2.6/bombardier-linux-amd64
           chmod +x bombardier-linux-amd64
@@ -37,38 +36,16 @@ jobs:
 
       - name: Execute Load Test
         env:
-          TARGET: ${{ github.event.inputs.target_url }}
-          PATH_ENDPOINT: ${{ github.event.inputs.endpoint }}
+          TARGET_DOMAIN: ${{ github.event.inputs.target_domain }}
+          URL_PATH: ${{ matrix.url_path }}
           CONCURRENT: ${{ github.event.inputs.concurrent_connections }}
           COUNT: ${{ github.event.inputs.requests_per_runner }}
         run: |
-          # Build full URL
-          FULL_URL="https://${TARGET}${PATH_ENDPOINT}"
-          
+          FULL_URL="https://${TARGET_DOMAIN}${URL_PATH}"
           echo "=== Runner ${{ matrix.instance }} ==="
           echo "Target: $FULL_URL"
           echo "Requests to send: $COUNT"
           echo "Concurrent connections: $CONCURRENT"
           echo "Start time: $(date -u)"
-          
-          # Run bombardier with HTTP/1.1 (avoid HTTP/2 deadlock)
-          # -l flag uses random UA from list to mimic diverse clients
-          # --timeout ensures we don't hang on dead connections
-          # -p enables progress bar (visible in logs)
-          bombardier \
-            -c "$CONCURRENT" \
-            -n "$COUNT" \
-            -l \
-            --http1 \
-            --timeout 10s \
-            -p \
-            "$FULL_URL"
-          
+          bombardier -c "$CONCURRENT" -n "$COUNT" -l --http1 --timeout 10s -p "$FULL_URL"
           echo "End time: $(date -u)"
-
-      - name: Upload Metrics (Optional)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: runner-${{ matrix.instance }}-logs
-          path: /home/runner/work/_temp/*.log
