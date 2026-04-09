@@ -12,7 +12,7 @@ on:
         required: true
         default: '100'
       requests_per_runner:
-        description: 'Requests per runner per URL (60k = 1.2M total across both)'
+        description: 'Requests per runner per URL'
         required: true
         default: '30000'
 
@@ -47,5 +47,5 @@ jobs:
           echo "Requests to send: $COUNT"
           echo "Concurrent connections: $CONCURRENT"
           echo "Start time: $(date -u)"
-          bombardier -c "$CONCURRENT" -n "$COUNT" -l --http1 --timeout 10s -p "$FULL_URL"
+          bombardier -c "$CONCURRENT" -n "$COUNT" -l --http1 --timeout 10s "$FULL_URL"
           echo "End time: $(date -u)"
