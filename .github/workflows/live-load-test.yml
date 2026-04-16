@@ -1,10 +1,8 @@
 name: Fetch Reddit Posts & Deploy to Pages
 
 on:
-  # Run daily at 09:00 UTC
   schedule:
-    - cron: '0 9 * * *'
-  # Allow manual trigger from GitHub UI
+    - cron: '0 9 * * *'  # Runs daily at 09:00 UTC
   workflow_dispatch:
     inputs:
       subreddit:
@@ -16,7 +14,6 @@ on:
         required: false
         default: '100'
 
-# Permissions to push to repo and deploy to Pages
 permissions:
   contents: write
   pages: write
@@ -32,13 +29,20 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Fetch Reddit JSON (direct, no CORS)
+      - name: Fetch Reddit JSON with proper headers
         run: |
           echo "Fetching ${{ env.LIMIT }} posts from r/${{ env.SUBREDDIT }}"
-          curl -s -H "User-Agent: GitHubAction/1.0 (by /u/yourusername)" \
+          curl -s -L -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
             "https://www.reddit.com/r/${{ env.SUBREDDIT }}.json?limit=${{ env.LIMIT }}" \
             -o reddit_raw.json
-          echo "Response saved"
+          
+          # Check if the file is valid JSON and not an error page
+          if ! jq empty reddit_raw.json 2>/dev/null; then
+            echo "ERROR: Response is not valid JSON. First 200 characters:"
+            head -c 200 reddit_raw.json
+            exit 1
+          fi
+          echo "✓ Valid JSON received"
 
       - name: Parse and filter posts with jq
         run: |
@@ -59,9 +63,16 @@ jobs:
             domain: .domain,
             over_18: .over_18
           } | select(.title != null)]' reddit_raw.json > posts.json
-          echo "Extracted $(jq length posts.json) posts"
+          
+          COUNT=$(jq length posts.json)
+          echo "✓ Extracted $COUNT posts"
+          
+          if [ "$COUNT" -eq 0 ]; then
+            echo "ERROR: No posts extracted. Check subreddit name."
+            exit 1
+          fi
 
-      - name: Generate simple viewer HTML (no external deps)
+      - name: Generate viewer HTML
         run: |
           cat > index.html << 'EOF'
           <!DOCTYPE html>
@@ -173,15 +184,19 @@ jobs:
           </body>
           </html>
           EOF
-          echo "index.html generated"
+          echo "✓ index.html generated"
 
       - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add posts.json index.html
-          git diff --staged --quiet || git commit -m "Auto-update Reddit posts (${{ env.SUBREDDIT }}) - $(date +'%Y-%m-%d %H:%M')"
-          git push origin main
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-update Reddit posts (${{ env.SUBREDDIT }}) - $(date +'%Y-%m-%d %H:%M')"
+            git push origin main
+          fi
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4
@@ -189,7 +204,7 @@ jobs:
       - name: Upload artifact for Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'  # index.html and posts.json are in root
+          path: '.'
 
       - name: Deploy to GitHub Pages
         id: deployment
@@ -199,4 +214,3 @@ jobs:
         run: |
           echo "✅ Your Reddit viewer is live at:"
           echo "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
-          echo "(Make sure GitHub Pages is enabled in your repo settings: Settings > Pages > Source = 'Deploy from a branch' then select 'gh-pages' branch OR set to 'GitHub Actions' – this workflow already uses Actions deployment)"
