@@ -1,51 +1,202 @@
-name: Tutor LMS Dual-URL Stress Test
+name: Fetch Reddit Posts & Deploy to Pages
 
 on:
+  # Run daily at 09:00 UTC
+  schedule:
+    - cron: '0 9 * * *'
+  # Allow manual trigger from GitHub UI
   workflow_dispatch:
     inputs:
-      target_domain:
-        description: 'Target domain (without https://)'
-        required: true
-        default: 'rifatacademy.com'
-      concurrent_connections:
-        description: 'Connections per runner'
-        required: true
+      subreddit:
+        description: 'Subreddit to fetch (default: popular)'
+        required: false
+        default: 'popular'
+      limit:
+        description: 'Number of posts (max 100)'
+        required: false
         default: '100'
-      requests_per_runner:
-        description: 'Requests per runner per URL'
-        required: true
-        default: '30000'
+
+# Permissions to push to repo and deploy to Pages
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
-  bombard:
-    name: Runner ${{ matrix.instance }} - ${{ matrix.url_path }}
+  fetch-and-deploy:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        instance: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
-        url_path:
-          - '/course-category/hsc/?tutor-course-filter-category=52'
-          - '/course-category/ssc-27-28/?tutor-course-filter-category=58'
+    env:
+      SUBREDDIT: ${{ github.event.inputs.subreddit || 'popular' }}
+      LIMIT: ${{ github.event.inputs.limit || '100' }}
     steps:
-      - name: Install Bombardier
-        run: |
-          wget -q https://github.com/codesenberg/bombardier/releases/download/v1.2.6/bombardier-linux-amd64
-          chmod +x bombardier-linux-amd64
-          sudo mv bombardier-linux-amd64 /usr/local/bin/bombardier
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Execute Load Test
-        env:
-          TARGET_DOMAIN: ${{ github.event.inputs.target_domain }}
-          URL_PATH: ${{ matrix.url_path }}
-          CONCURRENT: ${{ github.event.inputs.concurrent_connections }}
-          COUNT: ${{ github.event.inputs.requests_per_runner }}
+      - name: Fetch Reddit JSON (direct, no CORS)
         run: |
-          FULL_URL="https://${TARGET_DOMAIN}${URL_PATH}"
-          echo "=== Runner ${{ matrix.instance }} ==="
-          echo "Target: $FULL_URL"
-          echo "Requests to send: $COUNT"
-          echo "Concurrent connections: $CONCURRENT"
-          echo "Start time: $(date -u)"
-          bombardier -c "$CONCURRENT" -n "$COUNT" -l --http1 --timeout 10s "$FULL_URL"
-          echo "End time: $(date -u)"
+          echo "Fetching ${{ env.LIMIT }} posts from r/${{ env.SUBREDDIT }}"
+          curl -s -H "User-Agent: GitHubAction/1.0 (by /u/yourusername)" \
+            "https://www.reddit.com/r/${{ env.SUBREDDIT }}.json?limit=${{ env.LIMIT }}" \
+            -o reddit_raw.json
+          echo "Response saved"
+
+      - name: Parse and filter posts with jq
+        run: |
+          jq '[.data.children[].data | {
+            id: .id,
+            title: .title,
+            author: .author,
+            created_utc: .created_utc,
+            score: .score,
+            num_comments: .num_comments,
+            selftext: (.selftext | if length > 0 then . else null end),
+            url: .url,
+            post_hint: .post_hint,
+            is_gallery: (.is_gallery // false),
+            gallery_data: .gallery_data,
+            media_metadata: .media_metadata,
+            thumbnail: .thumbnail,
+            domain: .domain,
+            over_18: .over_18
+          } | select(.title != null)]' reddit_raw.json > posts.json
+          echo "Extracted $(jq length posts.json) posts"
+
+      - name: Generate simple viewer HTML (no external deps)
+        run: |
+          cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Reddit Viewer – 100 Posts</title>
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { background: #f0f2f5; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; padding: 1.5rem; }
+                  .container { max-width: 1000px; margin: 0 auto; }
+                  h1 { color: #ff4500; margin-bottom: 0.5rem; }
+                  .sub { color: #5b687c; margin-bottom: 2rem; border-left: 3px solid #ff4500; padding-left: 0.8rem; }
+                  .posts { display: flex; flex-direction: column; gap: 1.5rem; }
+                  .card { background: white; border-radius: 24px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 1px solid #e9edf2; }
+                  .title { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; color: #0f172a; text-decoration: none; }
+                  .meta { display: flex; gap: 1rem; font-size: 0.75rem; color: #5b6e8c; margin-bottom: 1rem; border-bottom: 1px solid #edf2f7; padding-bottom: 0.6rem; }
+                  .text-body { background: #f8fafc; padding: 1rem; border-radius: 20px; font-size: 0.95rem; line-height: 1.45; white-space: pre-wrap; border-left: 4px solid #ff4500; }
+                  .image-wrapper { margin-top: 1rem; text-align: center; background: #fefcf5; border-radius: 20px; padding: 0.8rem; }
+                  img { max-width: 100%; max-height: 400px; border-radius: 16px; object-fit: contain; }
+                  .external-link { color: #2563eb; word-break: break-all; }
+                  .error-text { color: #dc2626; }
+                  .loader { text-align: center; padding: 2rem; color: #ff4500; }
+                  footer { margin-top: 2rem; text-align: center; font-size: 0.75rem; color: #62748c; }
+              </style>
+          </head>
+          <body>
+          <div class="container">
+              <h1>📁 Reddit Daily Posts</h1>
+              <div class="sub">Fetched from r/<span id="subreddit-placeholder">...</span> • latest 100 posts</div>
+              <div id="posts-container" class="posts"><div class="loader">Loading posts...</div></div>
+              <footer>Data fetched daily via GitHub Actions | No proxy – served directly from GitHub Pages</footer>
+          </div>
+          <script>
+              async function loadPosts() {
+                  try {
+                      const response = await fetch('posts.json');
+                      if (!response.ok) throw new Error('Failed to load posts.json');
+                      const posts = await response.json();
+                      document.getElementById('subreddit-placeholder').innerText = '${{ env.SUBREDDIT }}';
+                      const container = document.getElementById('posts-container');
+                      if (!posts.length) {
+                          container.innerHTML = '<div class="error-text">No posts found.</div>';
+                          return;
+                      }
+                      let html = '';
+                      for (const post of posts) {
+                          // Determine image URL
+                          let imageUrl = null;
+                          if (post.post_hint === 'image' && post.url) {
+                              imageUrl = post.url;
+                          } else if (post.is_gallery && post.media_metadata) {
+                              // Extract first image from gallery
+                              const firstId = Object.keys(post.media_metadata)[0];
+                              if (firstId && post.media_metadata[firstId].s?.u) {
+                                  imageUrl = post.media_metadata[firstId].s.u.replace(/&amp;/g, '&');
+                              }
+                          } else if (post.url && (post.url.match(/\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i))) {
+                              imageUrl = post.url;
+                          }
+                          
+                          // Text content
+                          let textHtml = '';
+                          if (post.selftext && post.selftext.trim().length > 0) {
+                              const shortText = post.selftext.length > 500 ? post.selftext.slice(0, 500) + '…' : post.selftext;
+                              textHtml = `<div class="text-body">📝 ${shortText.replace(/\\n/g, '<br>')}</div>`;
+                          }
+                          
+                          // Image or link display
+                          let mediaHtml = '';
+                          if (imageUrl) {
+                              mediaHtml = `<div class="image-wrapper"><img src="${imageUrl}" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML+='<div class=\\'error-text\\'>⚠️ Image failed to load</div>'"></div>`;
+                          } else if (post.url && !post.selftext) {
+                              mediaHtml = `<div class="image-wrapper"><a href="${post.url}" target="_blank" class="external-link">🔗 ${post.domain || 'External link'}</a></div>`;
+                          }
+                          
+                          const date = new Date(post.created_utc * 1000).toLocaleString();
+                          html += `
+                              <div class="card">
+                                  <div class="title">${escapeHtml(post.title)}</div>
+                                  <div class="meta">
+                                      <span>👤 u/${escapeHtml(post.author)}</span>
+                                      <span>👍 ${post.score}</span>
+                                      <span>💬 ${post.num_comments}</span>
+                                      <span>📅 ${date}</span>
+                                  </div>
+                                  ${textHtml}
+                                  ${mediaHtml}
+                              </div>
+                          `;
+                      }
+                      container.innerHTML = html;
+                  } catch (err) {
+                      document.getElementById('posts-container').innerHTML = `<div class="error-text">❌ Error: ${err.message}. Make sure posts.json exists.</div>`;
+                  }
+              }
+              function escapeHtml(str) {
+                  if (!str) return '';
+                  return str.replace(/[&<>]/g, function(m) {
+                      if (m === '&') return '&amp;';
+                      if (m === '<') return '&lt;';
+                      if (m === '>') return '&gt;';
+                      return m;
+                  });
+              }
+              loadPosts();
+          </script>
+          </body>
+          </html>
+          EOF
+          echo "index.html generated"
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add posts.json index.html
+          git diff --staged --quiet || git commit -m "Auto-update Reddit posts (${{ env.SUBREDDIT }}) - $(date +'%Y-%m-%d %H:%M')"
+          git push origin main
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'  # index.html and posts.json are in root
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Output the Pages URL
+        run: |
+          echo "✅ Your Reddit viewer is live at:"
+          echo "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          echo "(Make sure GitHub Pages is enabled in your repo settings: Settings > Pages > Source = 'Deploy from a branch' then select 'gh-pages' branch OR set to 'GitHub Actions' – this workflow already uses Actions deployment)"
